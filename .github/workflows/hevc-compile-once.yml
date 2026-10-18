@@ -1,0 +1,82 @@
+# PREPARED ONLY. Install at .github/workflows/hevc-compile-once.yml in a separately
+# reviewed commit A; omit the legacy emscripten.yml at A. MAIN must choose this route.
+# After review/explicit authorization, create the exact execution ref at SAME A.
+name: HEVC compile once
+
+on:
+  push:
+    branches: [codex/hevc-hosted-compile-once-20261018]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hevc-compile-once-20261018
+  cancel-in-progress: false
+
+jobs:
+  compile:
+    if: >-
+      github.repository == 'dakshbhatia/libheif-emscripten' &&
+      github.ref == 'refs/heads/codex/hevc-hosted-compile-once-20261018' &&
+      github.event.created == true && github.event.deleted == false &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: emscripten/emsdk:3.1.61@sha256:30aa9fed39cc7810cc4338c77828bd513a6ee6b60c6b141bc6d9760aea5791e3
+      options: --cpus 4 --memory 8g --memory-swap 8g
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+    steps:
+      - name: Read the reviewed workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: workflow-source
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Read the frozen producer and its pinned submodule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ace8640ccf02de95ec4998d591b78649278d99b0
+          path: producer
+          persist-credentials: false
+          submodules: true
+          fetch-depth: 1
+      - name: Compile WASM without declarations or decoder execution
+        run: bash workflow-source/.github/scripts/hevc-compile-only.sh wasm
+      - name: Retain completed WASM before the JS link
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hevc-raw-wasm-${{ github.run_id }}-${{ github.sha }}
+          path: hevc-compile-out/wasm/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+      - name: Link JS using the same incremental static-library build directory
+        run: bash workflow-source/.github/scripts/hevc-compile-only.sh js
+      - name: Retain completed JS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hevc-raw-js-${{ github.run_id }}-${{ github.sha }}
+          path: hevc-compile-out/js/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+      - name: Retain logs and terminal compilation status even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hevc-compile-status-${{ github.run_id }}-${{ github.sha }}
+          path: hevc-compile-out/logs/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
